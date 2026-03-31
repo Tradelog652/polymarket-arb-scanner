@@ -3,20 +3,30 @@ const fetch = require("node-fetch");
 const cors = require("cors");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Enable CORS so GitHub Pages can call this backend
 app.use(cors());
+app.use(express.json());
 
-app.get("/proxy", async (req, res) => {
-  const url = req.query.url;
-  if (!url) return res.status(400).send("Missing URL");
+// Root route — fixes "Cannot GET /"
+app.get("/", (req, res) => {
+  res.send("Polymarket proxy is running");
+});
 
+// Proxy route your scanner.js calls
+app.get("/markets", async (req, res) => {
   try {
-    const response = await fetch(url);
-    const data = await response.text();
-    res.send(data);
+    const response = await fetch("https://api.polymarket.com/markets");
+    const data = await response.json();
+    res.json(data);
   } catch (err) {
-    res.status(500).send("Proxy error");
+    console.error("Proxy error:", err);
+    res.status(500).json({ error: "Failed to fetch markets" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Proxy server running"));
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
