@@ -1,206 +1,83 @@
-const PROXY = "https://polymarket-arb-hivj.onrender.com/proxy?url=";
-const PM_URL = "https://api.polymarket.com/markets";
-const KALSHI_URL = "https://api.kalshi.com/trade-api/v2/markets";
+const PROXY_URL = "https://polymarket-arb-scanner-2.onrender.com"; 
+// Replace with your actual Render URL if different
 
-const REFRESH_MS = 10000;
-const MIN_LIQUIDITY = 50;
+const statusEl = document.getElementById("status");
+const resultsEl = document.getElementById("results");
 
-// --- Utility: normalize text for loose matching ---
-function normalize(str) {
-  return str
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+async function fetchMarkets() {
+  try {
+    statusEl.textContent = "Fetching markets…";
 
-// --- Fetch Polymarket ---
-async function fetchPolymarket() {
-  const res = await fetch(PROXY + encodeURIComponent(PM_URL));
-  return res.json();
-}
+    const response = await fetch(`${PROXY_URL}/markets`);
+    if (!response.ok) throw new Error(`Proxy error: ${response.status}`);
 
-// --- Fetch Kalshi ---
-async function fetchKalshi() {
-  const res = await fetch(PROXY + encodeURIComponent(KALSHI_URL));
-  const data = await res.json();
-  return data.markets || [];
-}
+    const data = await response.json();
+    statusEl.textContent = "Processing markets…";
 
-// --- Multi-outcome arbitrage ---
-function detectPolymarketArb(market) {
-  if (!market.outcomes || market.outcomes.length < 2) return null;
-
-  const outcomes = market.outcomes
-    .map(o => ({
-      name: o.name,
-      price: o.price,
-      liquidity: o.liquidity || 0
-    }))
-    .filter(o => o.price > 0 && o.liquidity >= MIN_LIQUIDITY);
-
-  if (outcomes.length < 2) return null;
-
-  const sumInv = outcomes.reduce((acc, o) => acc + 1 / o.price, 0);
-
-  if (sumInv < 1) {
-    const totalStake = sumInv;
-    const profitPct = ((1 - totalStake) / totalStake) * 100;
-
-    return {
-      question: market.question,
-      outcomes,
-      profitPct,
-      totalStake
-    };
+    return data;
+  } catch (err) {
+    console.error("Fetch error:", err);
+    statusEl.textContent = "Failed to load markets (check proxy).";
+    return null;
   }
-
-  return null;
 }
 
-// --- Cross-exchange matching ---
-function matchMarkets(pmMarkets, kalshiMarkets) {
-  const matches = [];
+function findArbitrage(markets) {
+  const opportunities = [];
 
-  pmMarkets.forEach(pm => {
-    const pmNorm = normalize(pm.question);
+  markets.forEach(market => {
+    if (!market.outcomes || market.outcomes.length < 2) return;
 
-    let bestMatch = null;
-    let bestScore = 0;
+    const yes = market.outcomes.find(o => o.name === "Yes");
+    const no = market.outcomes.find(o => o.name === "No");
 
-    kalshiMarkets.forEach(k => {
-      const kNorm = normalize(k.title || k.ticker || "");
+    if (!yes || !no) return;
 
-      let score = 0;
-      pmNorm.split(" ").forEach(word => {
-        if (kNorm.includes(word)) score++;
+    const yesPrice = yes.price / 100;
+    const noPrice = no.price / 100;
+
+    const sum = yesPrice + noPrice;
+
+    if (sum < 1) {
+      opportunities.push({
+        question: market.question,
+        yesPrice,
+        noPrice,
+        edge: (1 - sum).toFixed(4)
       });
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = k;
-      }
-    });
-
-    if (bestScore >= 2 && bestMatch) {
-      matches.push({ pm, kalshi: bestMatch });
     }
   });
 
-  return matches;
+  return opportunities;
 }
 
-// --- Compare Polymarket vs Kalshi ---
-function compareExchanges(pairs) {
-  const results = [];
-
-  pairs.forEach(pair => {
-    const pm = pair.pm;
-    const k = pair.kalshi;
-
-    if (!pm.outcomes || pm.outcomes.length < 2) return;
-
-    const pmYes = pm.outcomes.find(o => o.name.toLowerCase().includes("yes"));
-    const pmNo = pm.outcomes.find(o => o.name.toLowerCase().includes("no"));
-
-    if (!pmYes || !pmNo) return;
-
-    const kYes = k.yes_price;
-    const kNo = k.no_price;
-
-    if (kYes == null || kNo == null) return;
-
-    const spreadYes = pmYes.price - kYes;
-    const spreadNo = pmNo.price - kNo;
-
-    results.push({
-      question: pm.question,
-      pmYes: pmYes.price,
-      pmNo: pmNo.price,
-      kYes,
-      kNo,
-      spreadYes,
-      spreadNo
-    });
-  });
-
-  return results;
-}
-
-// --- Render UI ---
-function render(arbs, cross) {
-  const container = document.getElementById("results");
-
-  let html = `<h2>Last updated: ${new Date().toLocaleTimeString()}</h2>`;
-
-  html += `<h3>Polymarket Arbitrage</h3>`;
-  if (arbs.length === 0) {
-    html += `<p>No Polymarket arbitrage found.</p>`;
-  } else {
-    html += `<table border="1" cellpadding="6">
-      <tr><th>Market</th><th>Outcomes</th><th>Profit %</th></tr>`;
-    arbs.forEach(a => {
-      const outs = a.outcomes
-        .map(o => `${o.name}: ${(o.price * 100).toFixed(2)}%`)
-        .join("<br>");
-      html += `<tr>
-        <td>${a.question}</td>
-        <td>${outs}</td>
-        <td style="color:green;font-weight:bold;">${a.profitPct.toFixed(2)}%</td>
-      </tr>`;
-    });
-    html += `</table>`;
+function renderResults(opps) {
+  if (!opps || opps.length === 0) {
+    resultsEl.innerHTML = "<p>No arbitrage found.</p>";
+    return;
   }
 
-  html += `<h3>Polymarket ↔ Kalshi Price Comparison</h3>`;
-  if (cross.length === 0) {
-    html += `<p>No matched markets.</p>`;
-  } else {
-    html += `<table border="1" cellpadding="6">
-      <tr>
-        <th>Market</th>
-        <th>PM Yes</th><th>Kalshi Yes</th><th>Spread</th>
-        <th>PM No</th><th>Kalshi No</th><th>Spread</th>
-      </tr>`;
-    cross.forEach(c => {
-      html += `<tr>
-        <td>${c.question}</td>
-        <td>${(c.pmYes * 100).toFixed(2)}%</td>
-        <td>${(c.kYes * 100).toFixed(2)}%</td>
-        <td>${c.spreadYes.toFixed(4)}</td>
-        <td>${(c.pmNo * 100).toFixed(2)}%</td>
-        <td>${(c.kNo * 100).toFixed(2)}%</td>
-        <td>${c.spreadNo.toFixed(4)}</td>
-      </tr>`;
-    });
-    html += `</table>`;
-  }
-
-  container.innerHTML = html;
+  resultsEl.innerHTML = opps
+    .map(o => `
+      <div class="opp">
+        <h3>${o.question}</h3>
+        <p>Yes: ${o.yesPrice}</p>
+        <p>No: ${o.noPrice}</p>
+        <p><strong>Edge: ${o.edge}</strong></p>
+      </div>
+    `)
+    .join("");
 }
 
-// --- Main loop ---
-async function run() {
-  try {
-    const [pm, kalshi] = await Promise.all([
-      fetchPolymarket(),
-      fetchKalshi()
-    ]);
+async function runScanner() {
+  const markets = await fetchMarkets();
+  if (!markets) return;
 
-    const pmArbs = pm
-      .map(detectPolymarketArb)
-      .filter(x => x)
-      .sort((a, b) => b.profitPct - a.profitPct);
+  const opps = findArbitrage(markets);
+  renderResults(opps);
 
-    const matched = matchMarkets(pm, kalshi);
-    const cross = compareExchanges(matched);
-
-    render(pmArbs, cross);
-  } catch (err) {
-    document.getElementById("results").innerHTML =
-      "<p style='color:red;'>Error loading data.</p>";
-  }
+  statusEl.textContent = "Scan complete.";
 }
 
-run();
-setInterval(run, REFRESH_MS);
+runScanner();
+
