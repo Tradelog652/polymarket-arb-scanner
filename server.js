@@ -5,27 +5,41 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS so GitHub Pages can call this backend
 app.use(cors());
 app.use(express.json());
 
-// Root route — fixes "Cannot GET /"
+// Root route
 app.get("/", (req, res) => {
   res.send("Polymarket proxy is running");
 });
 
-// Proxy route your scanner.js calls
+// Correct Polymarket endpoint + required headers
 app.get("/markets", async (req, res) => {
   try {
-    const response = await fetch("https://clob.polymarket.com/markets?limit=1000");
-    const data = await response.json();
+    const response = await fetch(
+      "https://api.polymarket.com/markets?limit=1000",
+      {
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0"
+        }
+      }
+    );
+
+    // If Polymarket returns HTML, catch it early
+    const text = await response.text();
+    if (text.trim().startsWith("<")) {
+      throw new Error("Polymarket returned HTML instead of JSON");
+    }
+
+    const data = JSON.parse(text);
     res.json(data);
+
   } catch (err) {
     console.error("Proxy error:", err);
     res.status(500).json({ error: "Failed to fetch markets" });
   }
 });
-
 
 // Start server
 app.listen(PORT, () => {
