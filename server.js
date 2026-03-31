@@ -8,76 +8,98 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Simple in‑memory cache to reduce rate limits
-let cachedMarkets = null;
-let cachedAt = 0;
-const CACHE_MS = 10 * 1000; // 10 seconds
+// Cache to avoid rate limits
+let cache = null;
+let cacheTime = 0;
+const CACHE_DURATION = 60 * 1000; // 60 seconds
 
-app.get("/", (req, res) => {
-  res.send("Polymarket proxy is running");
+// Helper: fetch with retries + fallback
+async function fetchPolymarket() {
+  const endpoints = [
+    "https://clob.polymarket.com/markets?limit=1000",
+    "https://api.polymarket.com/markets?limit=1000"
+  ];
+
+  const headers = {
+    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0",
+    "Origin": "https://polymarket.com",
+    "Referer": "https://polymarket.com/"
+  };
+
+  for (const url of endpoints) {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const res = await fetch(url, { headers });
+        const text = await res.text();
+
+        // HTML = Cloudflare / rate limit / error
+        if (text.trim().startsWith("<")) {
+          console.log(`HTML received from ${url} (attempt ${attempt})`);
+          await new Promise(r => setTimeout(r, 300 * attempt));
+          continue;
+        }
+
+        const json = JSON.parse(text);
+
+        // Normalize structure
+        const markets = Array.isArray(json)
+          ? json
+          : Array.isArray(json.markets)
+          ? json.markets
+          : null;
+
+        if (!markets) {
+          console.log(`Unexpected JSON shape from ${url}`);
+          continue;
+        }
+
+        return markets;
+      } catch (err) {
+        console.log(`Error on ${url} attempt ${attempt}:`, err.message);
+        await new Promise(r => setTimeout(r, 300 * attempt));
+      }
+    }
+  }
+
+  throw new Error("All Polymarket endpoints failed");
+}
+
+// Health check
+app.get("/health", (req, res) => {
+  res.json({
+    backend: "online",
+    cacheAgeMs: Date.now() - cacheTime,
+    cacheAvailable: cache !== null
+  });
 });
 
+// Main markets endpoint
 app.get("/markets", async (req, res) => {
   try {
-    const now = Date.now();
-
-    // Serve from cache if fresh
-    if (cachedMarkets && now - cachedAt < CACHE_MS) {
-      return res.json(cachedMarkets);
+    // Serve cached data if fresh
+    if (cache && Date.now() - cacheTime < CACHE_DURATION) {
+      return res.json(cache);
     }
 
-    const response = await fetch(
-      "https://clob.polymarket.com/markets?limit=1000",
-      {
-        headers: {
-          "Accept": "application/json",
-          "User-Agent": "Mozilla/5.0",
-          "Origin": "https://polymarket.com",
-          "Referer": "https://polymarket.com/"
-        }
-      }
-    );
+    const markets = await fetchPolymarket();
 
-    const contentType = response.headers.get("content-type") || "";
-    const raw = await response.text();
-
-    // If it's clearly HTML, bail
-    if (contentType.includes("text/html") || raw.trim().startsWith("<")) {
-      console.error("Polymarket returned HTML instead of JSON");
-      return res.status(502).json({ error: "Upstream returned HTML" });
-    }
-
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (e) {
-      console.error("Failed to parse Polymarket JSON:", e);
-      return res.status(502).json({ error: "Invalid JSON from upstream" });
-    }
-
-    // Normalize: CLOB API often returns { markets: [...] }
-    const markets = Array.isArray(data)
-      ? data
-      : Array.isArray(data.markets)
-      ? data.markets
-      : null;
-
-    if (!markets) {
-      console.error("Unexpected Polymarket shape:", Object.keys(data));
-      return res.status(502).json({ error: "Unexpected upstream format" });
-    }
-
-    // Cache and return
-    cachedMarkets = markets;
-    cachedAt = now;
+    // Cache result
+    cache = markets;
+    cacheTime = Date.now();
 
     res.json(markets);
   } catch (err) {
-    console.error("Proxy error:", err);
-    res.status(500).json({ error: "Failed to fetch markets" });
+    console.error("Final error:", err.message);
+
+    if (cache) {
+      return res.json(cache); // fallback to last known good data
+    }
+
+    res.status(502).json({ error: "Polymarket unreachable" });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Next‑level backend running on port ${PORT}`);
 });
