@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Polymarket Arbitrage Scanner</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Polymarket Arbitrage Scanner</h1>
+    <p>Live YES/NO arbitrage opportunities from Polymarket via Render proxy.</p>
+  </header>
+
+  <section class="controls">
+    <button id="refreshBtn">?? Refresh</button>
+    <label>
+      <input type="checkbox" id="autoRefreshToggle" />
+      Auto-refresh (30s)
+    </label>
+    <label>
+      Min liquidity ($):
+      <input type="number" id="minLiquidity" value="5000" />
+    </label>
+  </section>
+
+  <section id="status">
+    <div id="loading" class="loading hidden">Loading markets…</div>
+    <div id="error" class="error hidden"></div>
+  </section>
+
+  <section class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>YES</th>
+          <th>NO</th>
+          <th>Total</th>
+          <th>Edge</th>
+          <th>Liquidity</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+  </section>
+
+  <script src="js/scanner.js"></script>
+</body>
+</html>
