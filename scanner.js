@@ -3,6 +3,9 @@ const PROXY_URL = "https://polymarket-arb-scanner-2.onrender.com";
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 
+/* -----------------------------
+   FETCH MARKETS
+------------------------------*/
 async function fetchMarkets() {
   try {
     statusEl.textContent = "Fetching markets…";
@@ -21,36 +24,63 @@ async function fetchMarkets() {
   }
 }
 
+/* -----------------------------
+   NORMALISE OUTCOMES
+   Converts ANY market format into:
+   [{ name: "...", price: 0.52 }, ...]
+------------------------------*/
+function extractOutcomes(market) {
+  // Case 1: Polymarket "tokens" format
+  if (market.tokens && market.tokens.length > 0) {
+    return market.tokens.map(t => ({
+      name: t.outcome,
+      price: t.price
+    }));
+  }
+
+  // Case 2: Polymarket "outcomes" format (rare)
+  if (market.outcomes && market.outcomes.length > 0) {
+    return market.outcomes.map(o => ({
+      name: o.name,
+      price: o.price / 100
+    }));
+  }
+
+  return [];
+}
+
+/* -----------------------------
+   FIND ARBITRAGE
+   Works for:
+   - Yes/No markets
+   - Sports markets (2 outcomes)
+   - Multi-outcome markets (3+)
+------------------------------*/
 function findArbitrage(markets) {
   const opportunities = [];
 
   markets.forEach(market => {
-    // Your backend uses "tokens", not "outcomes"
-    if (!market.tokens || market.tokens.length < 2) return;
+    const outcomes = extractOutcomes(market);
+    if (outcomes.length < 2) return;
 
-    const yes = market.tokens.find(t => t.outcome === "Yes");
-    const no = market.tokens.find(t => t.outcome === "No");
-
-    if (!yes || !no) return;
-
-    const yesPrice = yes.price;
-    const noPrice = no.price;
-
-    const sum = yesPrice + noPrice;
+    const sum = outcomes.reduce((acc, o) => acc + o.price, 0);
 
     if (sum < 1) {
       opportunities.push({
         question: market.question,
-        yesPrice,
-        noPrice,
+        outcomes,
         edge: (1 - sum).toFixed(4)
       });
     }
   });
 
-  return opportunities;
+  // Sort by best edge
+  return opportunities.sort((a, b) => b.edge - a.edge);
 }
 
+/* -----------------------------
+   RENDER RESULTS
+------------------------------*/
 function renderResults(opps) {
   if (!opps || opps.length === 0) {
     resultsEl.innerHTML = "<p>No arbitrage found.</p>";
@@ -58,17 +88,30 @@ function renderResults(opps) {
   }
 
   resultsEl.innerHTML = opps
-    .map(o => `
-      <div class="opp">
-        <h3>${o.question}</h3>
-        <p>Yes: ${o.yesPrice}</p>
-        <p>No: ${o.noPrice}</p>
-        <p><strong>Edge: ${o.edge}</strong></p>
-      </div>
-    `)
+    .map(o => {
+      const color =
+        o.edge > 0.10 ? "green" :
+        o.edge > 0.03 ? "orange" :
+        "red";
+
+      const outcomesHTML = o.outcomes
+        .map(out => `<p>${out.name}: ${out.price}</p>`)
+        .join("");
+
+      return `
+        <div class="opp" style="border-left: 6px solid ${color}; padding-left: 10px;">
+          <h3>${o.question}</h3>
+          ${outcomesHTML}
+          <p><strong>Edge: ${o.edge}</strong></p>
+        </div>
+      `;
+    })
     .join("");
 }
 
+/* -----------------------------
+   MAIN SCANNER LOOP
+------------------------------*/
 async function runScanner() {
   const markets = await fetchMarkets();
   if (!markets) return;
@@ -79,4 +122,8 @@ async function runScanner() {
   statusEl.textContent = "Scan complete.";
 }
 
+/* -----------------------------
+   AUTO-REFRESH EVERY 10 SECONDS
+------------------------------*/
 runScanner();
+setInterval(runScanner, 10000);
