@@ -17,7 +17,7 @@ app.get("/", (req, res) => {
 // Proxy route your scanner.js calls
 app.get("/markets", async (req, res) => {
   try {
-    const response = await fetch("https://api.polymarket.com/markets");
+    const response = await fetch("https://clob.polymarket.com/markets?limit=1000");
     const data = await response.json();
     res.json(data);
   } catch (err) {
@@ -25,6 +25,7 @@ app.get("/markets", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch markets" });
   }
 });
+
 
 // Start server
 app.listen(PORT, () => {
