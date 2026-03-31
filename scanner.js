@@ -1,3 +1,4 @@
+const PROXY = "https://polymarket-arb-hivj.onrender.com/proxy?url=";
 const PROXY_URL = 'https://polymarket-arb-hivj.onrender.com/polymarket';
 
 const refreshBtn = document.getElementById('refreshBtn');
