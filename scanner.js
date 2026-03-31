@@ -1,5 +1,4 @@
-const PROXY_URL = "https://polymarket-arb-scanner-2.onrender.com"; 
-// Replace with your actual Render URL if different
+const PROXY_URL = "https://polymarket-arb-scanner-2.onrender.com";
 
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
@@ -26,15 +25,16 @@ function findArbitrage(markets) {
   const opportunities = [];
 
   markets.forEach(market => {
-    if (!market.outcomes || market.outcomes.length < 2) return;
+    // Your backend uses "tokens", not "outcomes"
+    if (!market.tokens || market.tokens.length < 2) return;
 
-    const yes = market.outcomes.find(o => o.name === "Yes");
-    const no = market.outcomes.find(o => o.name === "No");
+    const yes = market.tokens.find(t => t.outcome === "Yes");
+    const no = market.tokens.find(t => t.outcome === "No");
 
     if (!yes || !no) return;
 
-    const yesPrice = yes.price / 100;
-    const noPrice = no.price / 100;
+    const yesPrice = yes.price;
+    const noPrice = no.price;
 
     const sum = yesPrice + noPrice;
 
@@ -80,4 +80,3 @@ async function runScanner() {
 }
 
 runScanner();
-
